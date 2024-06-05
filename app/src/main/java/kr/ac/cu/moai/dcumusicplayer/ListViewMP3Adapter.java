@@ -1,10 +1,10 @@
 package kr.ac.cu.moai.dcumusicplayer;
 
-import android.annotation.SuppressLint;
 import android.content.Context;
-import android.graphics.Bitmap;
+import android.content.res.AssetFileDescriptor;
 import android.graphics.BitmapFactory;
 import android.media.MediaMetadataRetriever;
+import android.util.Log;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
@@ -14,25 +14,26 @@ import android.widget.TextView;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Locale;
 
 public class ListViewMP3Adapter extends BaseAdapter {
-
     private final Context context;
-    private final ArrayList<String> mp3s;
+    private final ArrayList<Integer> mp3files;
+    private static final String TAG = "ListViewMP3Adapter";
 
-    ListViewMP3Adapter(Context context, ArrayList<String> mp3s) {
+    public ListViewMP3Adapter(Context context, ArrayList<Integer> mp3files) {
         this.context = context;
-        this.mp3s = mp3s;
+        this.mp3files = mp3files;
     }
 
     @Override
     public int getCount() {
-        return mp3s.size();
+        return mp3files.size();
     }
 
     @Override
-    public String getItem(int position) {
-        return mp3s.get(position);
+    public Object getItem(int position) {
+        return mp3files.get(position);
     }
 
     @Override
@@ -40,43 +41,53 @@ public class ListViewMP3Adapter extends BaseAdapter {
         return position;
     }
 
-    @SuppressLint("SetTextI18n")
     @Override
     public View getView(int position, View convertView, ViewGroup parent) {
-        try (MediaMetadataRetriever retriever = new MediaMetadataRetriever()) {
-            @SuppressLint({"ViewHolder", "InflateParams"})
-            View view = LayoutInflater.from(context).inflate(R.layout.list_view_mp3, null);
-
-            ImageView ivCover = view.findViewById(R.id.ivCover);
-            retriever.setDataSource(mp3s.get(position));
-            byte[] b = retriever.getEmbeddedPicture();
-            Bitmap cover = BitmapFactory.decodeByteArray(b, 0, b.length);
-            ivCover.setImageBitmap(cover);
-
-            TextView tvTitle = view.findViewById(R.id.tvTitle);
-            String title = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_TITLE);
-            tvTitle.setText(title);
-
-            TextView tvDuration = view.findViewById(R.id.tvDuration);
-            tvDuration.setText(getDuration(retriever));
-
-            TextView tvArtist = view.findViewById(R.id.tvArtist);
-            String artist = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_ARTIST);
-            tvArtist.setText(artist);
-
-            return view;
-        } catch (IOException e) {
-            throw new RuntimeException(e);
+        if (convertView == null) {
+            LayoutInflater inflater = LayoutInflater.from(context);
+            convertView = inflater.inflate(R.layout.list_view_mp3, parent, false);
         }
+
+        ImageView ivCover = convertView.findViewById(R.id.ivCover);
+        TextView tvTitle = convertView.findViewById(R.id.tvTitle);
+        TextView tvArtist = convertView.findViewById(R.id.tvArtist);
+        TextView tvDuration = convertView.findViewById(R.id.tvDuration);
+
+        MediaMetadataRetriever retriever = new MediaMetadataRetriever();
+        try (AssetFileDescriptor afd = context.getResources().openRawResourceFd(mp3files.get(position))) {
+            retriever.setDataSource(afd.getFileDescriptor(), afd.getStartOffset(), afd.getLength());
+
+            byte[] coverBytes = retriever.getEmbeddedPicture();
+            if (coverBytes != null) {
+                ivCover.setImageBitmap(BitmapFactory.decodeByteArray(coverBytes, 0, coverBytes.length));
+            } else {
+                ivCover.setImageResource(R.drawable.default_cover); // 기본 커버 이미지 설정
+            }
+
+            tvTitle.setText(retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_TITLE));
+            tvArtist.setText(retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_ARTIST));
+            tvDuration.setText(getDuration(retriever));
+        } catch (IOException e) {
+            Log.e(TAG, "Error loading MP3 file", e);
+        } finally {
+            try {
+                retriever.release();
+            } catch (IOException e) {
+                throw new RuntimeException(e);
+            }
+        }
+
+        return convertView;
     }
 
     public static String getDuration(MediaMetadataRetriever retriever) {
-        long d = Long.parseLong(retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION));
-        String s = String.valueOf((d % 60000) / 1000), m = String.valueOf(d / 60000);
-        if(s.length() == 1) s = "0" + s;
-        if(m.length() == 1) m = "0" + m;
-
-        return m + ":" + s;
+        String durationStr = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION);
+        if (durationStr != null) {
+            int duration = Integer.parseInt(durationStr);
+            int minutes = (duration / 1000) / 60;
+            int seconds = (duration / 1000) % 60;
+            return String.format(Locale.getDefault(), "%02d:%02d", minutes, seconds);
+        }
+        return "00:00";
     }
-
 }
